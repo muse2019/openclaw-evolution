@@ -1,23 +1,28 @@
 /**
- * Ask Executor (L1)
- * Shows preview and asks user for confirmation before executing
+ * Ask Executor (🟡 Ask)
+ * Generates a preview report for user confirmation
+ * Instead of blocking for user input, writes to a pending file
  */
 
-import { RiskLevel, EvolutionProposal, EvolutionResult, OpenClawAPI } from '../types.js';
+import { RiskLevel, EvolutionProposal, EvolutionResult } from '../types.js';
 import { Executor } from './base.js';
 import { EvolutionLog } from '../storage/index.js';
+import * as fs from 'fs';
+import * as path from 'path';
 
 export class AskExecutor implements Executor {
-  private api: OpenClawAPI;
+  private dataDir: string;
   private evolutionLog: EvolutionLog;
+  private pendingDir: string;
 
-  constructor(api: OpenClawAPI, evolutionLog: EvolutionLog) {
-    this.api = api;
+  constructor(dataDir: string, evolutionLog: EvolutionLog) {
+    this.dataDir = dataDir;
     this.evolutionLog = evolutionLog;
+    this.pendingDir = path.join(dataDir, 'pending');
   }
 
   canHandle(level: RiskLevel): boolean {
-    return level === 'L1';
+    return level === 'ask';
   }
 
   async execute(proposal: EvolutionProposal): Promise<EvolutionResult> {
@@ -26,100 +31,38 @@ export class AskExecutor implements Executor {
       const beforeContent = await this.getBeforeContent(proposal);
 
       // Generate preview of the change
-      const preview = await this.generatePreview(proposal, beforeContent);
+      const preview = this.generatePreview(proposal, beforeContent);
 
-      // Ask user for confirmation
-      const options = [
-        'Approve - apply this change',
-        'Reject - skip this change',
-        'Modify - adjust the proposal',
-      ];
+      // Write to pending file for user review
+      const pendingFile = await this.writePendingProposal(proposal, preview);
 
-      const response = await this.api.askUser(
-        this.formatQuestion(proposal, preview),
-        options
-      );
-
-      if (response === options[0]) {
-        // Approved - execute
-        return await this.executeApproved(proposal, beforeContent);
-      } else if (response === options[2]) {
-        // Modify - get new input
-        return await this.handleModify(proposal);
-      } else {
-        // Rejected
-        return {
-          success: false,
-          proposalId: proposal.id,
-          action: 'asked',
-          message: 'User rejected the change',
-          rollbackAvailable: false,
-        };
-      }
+      return {
+        success: false, // Not executed yet, waiting for approval
+        proposalId: proposal.id,
+        action: 'asked',
+        message: `🟡 Pending approval: ${proposal.change}\nPreview written to: ${pendingFile}`,
+        rollbackAvailable: false,
+      };
     } catch (error) {
       return {
         success: false,
         proposalId: proposal.id,
         action: 'asked',
-        message: `Failed to process: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        message: `Failed to create preview: ${error instanceof Error ? error.message : 'Unknown error'}`,
         rollbackAvailable: false,
       };
     }
   }
 
-  // ============================================
-  // Private methods
-  // ============================================
-
-  private async getBeforeContent(proposal: EvolutionProposal): Promise<string> {
-    switch (proposal.type) {
-      case 'skill':
-        return await this.api.getSkill(proposal.target);
-      case 'config':
-        const configValue = await this.api.getConfig(proposal.target);
-        return JSON.stringify(configValue, null, 2);
-      case 'memory':
-        const memoryValue = await this.api.getMemory(proposal.target);
-        return JSON.stringify(memoryValue, null, 2);
-      default:
-        return await this.api.readFile(proposal.target);
-    }
-  }
-
-  private async generatePreview(proposal: EvolutionProposal, current: string): Promise<string> {
-    // Generate a preview of what the change would look like
-    return `
-## Proposed Change
-**Target:** ${proposal.target}
-**Type:** ${proposal.type}
-
-**Reasoning:**
-${proposal.reasoning}
-
-**Change:**
-${proposal.change}
-
-## Current Content
-\`\`\`
-${current.slice(0, 500)}${current.length > 500 ? '...' : ''}
-\`\`\`
-`;
-  }
-
-  private formatQuestion(proposal: EvolutionProposal, preview: string): string {
-    return `
-## Evolution Proposal (L1 - Requires Approval)
-
-${preview}
-
-Do you want to apply this change?
-`;
-  }
-
-  private async executeApproved(proposal: EvolutionProposal, beforeContent: string): Promise<EvolutionResult> {
+  /**
+   * Execute an approved proposal
+   */
+  async executeApproved(proposal: EvolutionProposal, beforeContent: string): Promise<EvolutionResult> {
     try {
+      const targetPath = this.resolveTargetPath(proposal);
+      
       // Apply the change
-      const afterContent = await this.applyChange(proposal, beforeContent);
+      const afterContent = await this.applyChange(proposal, beforeContent, targetPath);
 
       // Record the evolution
       const before = EvolutionLog.createFileSnapshot(proposal.target, beforeContent);
@@ -127,13 +70,11 @@ Do you want to apply this change?
 
       await this.evolutionLog.record(proposal, before, after);
 
-      this.api.log(`[L1 Ask] User approved and executed: ${proposal.change}`, 'info');
-
       return {
         success: true,
         proposalId: proposal.id,
         action: 'executed',
-        message: `Applied with user approval: ${proposal.change}`,
+        message: `🟡 Approved and executed: ${proposal.change}`,
         rollbackAvailable: true,
       };
     } catch (error) {
@@ -147,51 +88,103 @@ Do you want to apply this change?
     }
   }
 
-  private async handleModify(proposal: EvolutionProposal): Promise<EvolutionResult> {
-    const newChange = await this.api.askUser(
-      'Please provide the modified change description:',
-      ['Cancel'] // Placeholder - would need free text input
-    );
+  // ============================================
+  // Private methods
+  // ============================================
 
-    if (newChange === 'Cancel') {
-      return {
-        success: false,
-        proposalId: proposal.id,
-        action: 'asked',
-        message: 'User cancelled modification',
-        rollbackAvailable: false,
-      };
+  private async getBeforeContent(proposal: EvolutionProposal): Promise<string> {
+    const targetPath = this.resolveTargetPath(proposal);
+    
+    if (fs.existsSync(targetPath)) {
+      return fs.readFileSync(targetPath, 'utf-8');
     }
-
-    // Would need to re-process with the new change
-    return {
-      success: false,
-      proposalId: proposal.id,
-      action: 'asked',
-      message: 'Modification requested - needs re-processing',
-      rollbackAvailable: false,
-    };
+    
+    return '';
   }
 
-  private async applyChange(proposal: EvolutionProposal, current: string): Promise<string> {
-    switch (proposal.type) {
-      case 'skill': {
-        // Apply the actual change
-        // This would need implementation based on proposal.change
-        await this.api.updateSkill(proposal.target, current);
-        return current;
-      }
-      case 'config': {
-        // Parse and apply config change
-        await this.api.setConfig(proposal.target, proposal.change);
-        return proposal.change;
-      }
-      case 'memory': {
-        await this.api.setMemory(proposal.target, proposal.change);
-        return proposal.change;
-      }
-      default:
-        throw new Error(`Unsupported target type: ${proposal.type}`);
+  private generatePreview(proposal: EvolutionProposal, current: string): string {
+    const lines = [
+      `# Evolution Proposal (🟡 Ask - Requires Approval)`,
+      ``,
+      `## Metadata`,
+      `- **ID:** ${proposal.id}`,
+      `- **Type:** ${proposal.type}`,
+      `- **Target:** ${proposal.target}`,
+      `- **Generated:** ${proposal.timestamp.toISOString()}`,
+      `- **Source:** ${proposal.source}`,
+      ``,
+      `## Proposed Change`,
+      proposal.change,
+      ``,
+      `## Reasoning`,
+      proposal.reasoning,
+      ``,
+      `## Current Content`,
+      '```',
+      current.slice(0, 1000) + (current.length > 1000 ? '\n... (truncated)' : ''),
+      '```',
+      ``,
+      `---`,
+      ``,
+      `To approve this change, reply with:`,
+      `\`/evolution approve ${proposal.id}\``,
+      ``,
+      `To reject this change, reply with:`,
+      `\`/evolution reject ${proposal.id}\``,
+    ];
+
+    return lines.join('\n');
+  }
+
+  private async writePendingProposal(proposal: EvolutionProposal, preview: string): Promise<string> {
+    // Ensure pending directory exists
+    if (!fs.existsSync(this.pendingDir)) {
+      fs.mkdirSync(this.pendingDir, { recursive: true });
     }
+
+    // Write preview file
+    const previewFile = path.join(this.pendingDir, `${proposal.id}.md`);
+    fs.writeFileSync(previewFile, preview, 'utf-8');
+
+    // Write proposal JSON for later execution
+    const proposalFile = path.join(this.pendingDir, `${proposal.id}.json`);
+    fs.writeFileSync(proposalFile, JSON.stringify(proposal, null, 2), 'utf-8');
+
+    return previewFile;
+  }
+
+  private resolveTargetPath(proposal: EvolutionProposal): string {
+    if (path.isAbsolute(proposal.target)) {
+      return proposal.target;
+    }
+    
+    const homeDir = process.env.HOME || process.env.USERPROFILE || '';
+    
+    switch (proposal.type) {
+      case 'skill':
+        return path.join(homeDir, '.openclaw', 'workspace', 'skills', proposal.target);
+      case 'config':
+        return path.join(homeDir, '.openclaw', 'config', proposal.target);
+      case 'memory':
+        return path.join(homeDir, '.openclaw', 'memory', proposal.target);
+      default:
+        return path.join(homeDir, '.openclaw', proposal.target);
+    }
+  }
+
+  private async applyChange(proposal: EvolutionProposal, current: string, targetPath: string): Promise<string> {
+    // Apply the actual change based on proposal
+    // This would need implementation based on proposal.change
+    const updatedContent = current; // Placeholder
+    
+    // Ensure directory exists
+    const dir = path.dirname(targetPath);
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+    
+    fs.writeFileSync(targetPath, updatedContent, 'utf-8');
+    
+    return updatedContent;
   }
 }

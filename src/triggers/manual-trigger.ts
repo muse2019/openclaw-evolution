@@ -11,7 +11,7 @@ export interface ManualTriggerOptions {
   target?: string;      // Specific target to analyze
   type?: 'skill' | 'config' | 'memory' | 'framework';
   fullAnalysis?: boolean;  // Run all analyzers
-  reportOnly?: boolean;    // Only generate reports, no L0/L1 execution
+  reportOnly?: boolean;    // Only generate reports, no 🟢🟡 execution
 }
 
 export class ManualTrigger {

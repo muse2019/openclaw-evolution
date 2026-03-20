@@ -1,23 +1,26 @@
 /**
- * Auto Executor (L0)
+ * Auto Executor (🟢 Auto)
  * Automatically executes low-risk changes without user confirmation
+ * Uses direct fs operations instead of fake API calls
  */
 
-import { RiskLevel, EvolutionProposal, EvolutionResult, OpenClawAPI } from '../types.js';
+import { RiskLevel, EvolutionProposal, EvolutionResult } from '../types.js';
 import { Executor } from './base.js';
 import { EvolutionLog } from '../storage/index.js';
+import * as fs from 'fs';
+import * as path from 'path';
 
 export class AutoExecutor implements Executor {
-  private api: OpenClawAPI;
+  private dataDir: string;
   private evolutionLog: EvolutionLog;
 
-  constructor(api: OpenClawAPI, evolutionLog: EvolutionLog) {
-    this.api = api;
+  constructor(dataDir: string, evolutionLog: EvolutionLog) {
+    this.dataDir = dataDir;
     this.evolutionLog = evolutionLog;
   }
 
   canHandle(level: RiskLevel): boolean {
-    return level === 'L0';
+    return level === 'auto';
   }
 
   async execute(proposal: EvolutionProposal): Promise<EvolutionResult> {
@@ -26,7 +29,7 @@ export class AutoExecutor implements Executor {
       const beforeContent = await this.getBeforeContent(proposal);
 
       // Apply the change
-      const afterContent = await this.applyChange(proposal);
+      const afterContent = await this.applyChange(proposal, beforeContent);
 
       // Record the evolution
       const before = EvolutionLog.createFileSnapshot(proposal.target, beforeContent);
@@ -34,14 +37,11 @@ export class AutoExecutor implements Executor {
 
       await this.evolutionLog.record(proposal, before, after);
 
-      // Log the action
-      this.api.log(`[L0 Auto] Executed: ${proposal.change}`, 'info');
-
       return {
         success: true,
         proposalId: proposal.id,
         action: 'executed',
-        message: `Automatically applied: ${proposal.change}`,
+        message: `🟢 Auto-executed: ${proposal.change}`,
         rollbackAvailable: true,
       };
     } catch (error) {
@@ -60,41 +60,64 @@ export class AutoExecutor implements Executor {
   // ============================================
 
   private async getBeforeContent(proposal: EvolutionProposal): Promise<string> {
-    switch (proposal.type) {
-      case 'skill':
-        return await this.api.getSkill(proposal.target);
-      case 'config':
-        const configValue = await this.api.getConfig(proposal.target);
-        return JSON.stringify(configValue);
-      case 'memory':
-        const memoryValue = await this.api.getMemory(proposal.target);
-        return JSON.stringify(memoryValue);
-      default:
-        return await this.api.readFile(proposal.target);
+    const targetPath = this.resolveTargetPath(proposal);
+    
+    if (fs.existsSync(targetPath)) {
+      return fs.readFileSync(targetPath, 'utf-8');
     }
+    
+    return '';
   }
 
-  private async applyChange(proposal: EvolutionProposal): Promise<string> {
-    // For L0 changes, we apply the improvement directly
-    // The actual change logic depends on the type of improvement
+  private async applyChange(proposal: EvolutionProposal, currentContent: string): Promise<string> {
+    const targetPath = this.resolveTargetPath(proposal);
+    
+    // Apply text improvement based on proposal type
+    const updatedContent = this.applyTextImprovement(currentContent, proposal.change);
+    
+    // Ensure directory exists
+    const dir = path.dirname(targetPath);
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+    
+    // Write the updated content
+    fs.writeFileSync(targetPath, updatedContent, 'utf-8');
+    
+    return updatedContent;
+  }
 
+  private resolveTargetPath(proposal: EvolutionProposal): string {
+    // If target is already an absolute path, use it
+    if (path.isAbsolute(proposal.target)) {
+      return proposal.target;
+    }
+    
+    // Otherwise, resolve relative to home directory
+    const homeDir = process.env.HOME || process.env.USERPROFILE || '';
+    
     switch (proposal.type) {
-      case 'skill': {
-        const current = await this.api.getSkill(proposal.target);
-        // Apply typo fix or phrasing improvement
-        // This would need actual implementation based on proposal.change
-        const updated = this.applyTextImprovement(current, proposal.change);
-        await this.api.updateSkill(proposal.target, updated);
-        return updated;
-      }
+      case 'skill':
+        return path.join(homeDir, '.openclaw', 'workspace', 'skills', proposal.target);
+      case 'config':
+        return path.join(homeDir, '.openclaw', 'config', proposal.target);
+      case 'memory':
+        return path.join(homeDir, '.openclaw', 'memory', proposal.target);
       default:
-        throw new Error(`Unsupported target type for auto-execution: ${proposal.type}`);
+        return path.join(homeDir, '.openclaw', proposal.target);
     }
   }
 
   private applyTextImprovement(content: string, change: string): string {
     // This is a placeholder - actual implementation would parse the change
-    // and apply specific text improvements
+    // and apply specific text improvements (typo fixes, phrasing improvements)
+    // For now, we just return the content unchanged
+    // In a real implementation, this would use NLP or pattern matching
+    // to apply the described change
+    
+    // Example: if change is "fix typo 'recieve' -> 'receive'"
+    // we would search and replace in the content
+    
     return content;
   }
 }

@@ -1,6 +1,7 @@
 /**
  * Evolution Engine
  * Core orchestrator for the evolution process
+ * Refactored to use real OpenClaw Plugin API
  */
 
 import {
@@ -10,7 +11,7 @@ import {
   TriggerType,
   ErrorContext,
   EngineStatus,
-  OpenClawAPI,
+  EvolutionConfig,
 } from './types.js';
 
 import { ErrorLog, EvolutionLog, MetricsStore } from './storage/index.js';
@@ -23,7 +24,8 @@ import { ErrorTrigger, TimerTrigger, ManualTrigger, ManualTriggerOptions } from 
 export interface EvolutionEngineConfig {
   dataDir: string;
   openclawDir: string;
-  enabled: boolean;
+  workspaceDir: string;
+  config: EvolutionConfig;
 }
 
 export class EvolutionEngine {
@@ -54,39 +56,43 @@ export class EvolutionEngine {
   private manualTrigger: ManualTrigger;
 
   // State
-  private api: OpenClawAPI;
+  private api: { logger: { info: (msg: string) => void; warn: (msg: string) => void; error: (msg: string) => void } };
+  private config: EvolutionConfig;
   private running: boolean = false;
   private proposalsGenerated: number = 0;
   private proposalsExecuted: number = 0;
   private proposalsRolledBack: number = 0;
 
-  constructor(api: OpenClawAPI, config: EvolutionEngineConfig) {
+  constructor(
+    api: { logger: { info: (msg: string) => void; warn: (msg: string) => void; error: (msg: string) => void } },
+    engineConfig: EvolutionEngineConfig
+  ) {
     this.api = api;
+    this.config = engineConfig.config;
 
     // Initialize storage
-    this.errorLog = new ErrorLog(config.dataDir);
-    this.evolutionLog = new EvolutionLog(config.dataDir);
-    this.metricsStore = new MetricsStore(config.dataDir);
+    this.errorLog = new ErrorLog(engineConfig.dataDir);
+    this.evolutionLog = new EvolutionLog(engineConfig.dataDir);
+    this.metricsStore = new MetricsStore(engineConfig.dataDir);
 
     // Initialize safety
     this.pathChecker = new PathChecker();
-    this.rateLimiter = new RateLimiter(config.dataDir);
+    this.rateLimiter = new RateLimiter(engineConfig.dataDir);
     this.rollbackManager = new RollbackManager(this.evolutionLog);
 
     // Initialize analyzers
     this.rootCauseAnalyzer = new RootCauseAnalyzer(this.errorLog);
-    this.frameworkAnalyzer = new FrameworkAnalyzer(config.openclawDir);
+    this.frameworkAnalyzer = new FrameworkAnalyzer(engineConfig.openclawDir);
     this.metricsAnalyzer = new MetricsAnalyzer(this.metricsStore, this.evolutionLog);
 
     // Initialize classifier
     this.riskClassifier = new RiskClassifier();
 
-    // Initialize executors
+    // Initialize executors with dataDir for fs operations
     this.executors = new Map();
-    this.executors.set('L0', new AutoExecutor(api, this.evolutionLog));
-    this.executors.set('L1', new AskExecutor(api, this.evolutionLog));
-    this.executors.set('L2', new SuggestExecutor(config.dataDir));
-    this.executors.set('L3', new ForbiddenExecutor(config.dataDir));
+    this.executors.set('auto', new AutoExecutor(engineConfig.dataDir, this.evolutionLog));
+    this.executors.set('ask', new AskExecutor(engineConfig.dataDir, this.evolutionLog));
+    this.executors.set('forbid', new ForbiddenExecutor(engineConfig.dataDir));
 
     // Initialize triggers
     this.errorTrigger = new ErrorTrigger(this.errorLog);
@@ -109,7 +115,7 @@ export class EvolutionEngine {
 
     this.running = true;
     this.timerTrigger.start();
-    this.api.log('[Evolution] Engine started', 'info');
+    this.api.logger.info('[Evolution] Engine started');
   }
 
   /**
@@ -118,7 +124,7 @@ export class EvolutionEngine {
   stop(): void {
     this.running = false;
     this.timerTrigger.stop();
-    this.api.log('[Evolution] Engine stopped', 'info');
+    this.api.logger.info('[Evolution] Engine stopped');
   }
 
   /**
@@ -132,21 +138,24 @@ export class EvolutionEngine {
    * Record an error (for error-driven evolution)
    */
   async recordError(error: ErrorContext): Promise<boolean> {
-    // Record success/error for metrics
-    await this.metricsStore.recordError(error.skillName, {
+    // Record error for metrics
+    await this.metricsStore.recordError(error.toolName, {
       type: error.errorType,
       message: error.errorMessage,
     });
+
+    // Log the error
+    await this.errorLog.log(error);
 
     // Check if error trigger should fire
     return this.errorTrigger.recordError(error);
   }
 
   /**
-   * Record a success (for metrics)
+   * Record session end (for metrics)
    */
-  async recordSuccess(skillName?: string): Promise<void> {
-    await this.metricsStore.recordSuccess(skillName);
+  async recordSessionEnd(sessionId: string): Promise<void> {
+    await this.metricsStore.recordSessionEnd(sessionId);
   }
 
   /**
@@ -156,6 +165,7 @@ export class EvolutionEngine {
     const result = await this.rollbackManager.rollback(evolutionId, reason);
     if (result.success) {
       this.proposalsRolledBack++;
+      this.api.logger.info(`[Evolution] Rolled back ${evolutionId}: ${reason}`);
     }
     return result.success;
   }
@@ -254,9 +264,8 @@ export class EvolutionEngine {
       await this.metricsAnalyzer.updateEvolutionEffectiveness();
 
     } catch (error) {
-      this.api.log(
-        `[Evolution] Error processing trigger: ${error instanceof Error ? error.message : 'Unknown'}`,
-        'error'
+      this.api.logger.error(
+        `[Evolution] Error processing trigger: ${error instanceof Error ? error.message : 'Unknown'}`
       );
     }
 
@@ -303,8 +312,8 @@ export class EvolutionEngine {
     // 1. Check path permissions
     const pathCheck = this.pathChecker.isAllowed(proposal.target);
     if (!pathCheck.allowed) {
-      proposal.riskLevel = 'L3';
-      const executor = this.executors.get('L3')!;
+      proposal.riskLevel = 'forbid';
+      const executor = this.executors.get('forbid')!;
       return executor.execute(proposal);
     }
 
@@ -312,9 +321,9 @@ export class EvolutionEngine {
     const classification = this.riskClassifier.classify(proposal);
     proposal.riskLevel = classification.level;
 
-    // 3. If report-only mode, upgrade L0/L1 to L2
-    if (reportOnly && (classification.level === 'L0' || classification.level === 'L1')) {
-      proposal.riskLevel = 'L2';
+    // 3. If report-only mode, upgrade auto/ask to forbid
+    if (reportOnly && (classification.level === 'auto' || classification.level === 'ask')) {
+      proposal.riskLevel = 'forbid';
     }
 
     // 4. Check rate limits
@@ -323,7 +332,7 @@ export class EvolutionEngine {
       return {
         success: false,
         proposalId: proposal.id,
-        action: proposal.riskLevel === 'L3' ? 'forbidden' : 'rejected',
+        action: proposal.riskLevel === 'forbid' ? 'forbidden' : 'rejected',
         message: rateCheck.reason || 'Rate limit exceeded',
         rollbackAvailable: false,
       };

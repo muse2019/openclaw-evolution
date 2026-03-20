@@ -22,13 +22,18 @@
   "license": "MIT",
   "devDependencies": {
     "@types/node": "^20.0.0",
+    "openclaw": "^2026.3.13",
     "typescript": "^5.0.0"
   },
   "engines": {
     "node": ">=18.0.0"
   },
   "openclaw": {
-    "extensions": ["./dist/index.js"],
-    "skills": ["./skills/evolve"]
+    "extensions": [
+      "./dist/index.js"
+    ],
+    "skills": [
+      "./skills/evolve"
+    ]
   }
 }

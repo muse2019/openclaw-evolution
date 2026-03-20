@@ -7,7 +7,8 @@ A self-evolution plugin for OpenClaw that enables the AI assistant to learn from
 - **Error-Driven Learning**: Automatically analyzes errors and generates improvement proposals
 - **Periodic Analysis**: Scheduled framework and metrics analysis
 - **Manual Triggers**: User can request evolution at any time
-- **Risk-Based Approval**: Four-level system (L0-L3) for safe self-modification
+- **Risk-Based Approval**: Three-level system (🟢🟡🔴) for safe self-modification
+- **Global Switch**: Master toggle to enable/disable evolution system
 - **Rollback Support**: Every change can be undone
 
 ## Installation
@@ -56,10 +57,9 @@ User: /evolution_rollback <id> <reason>
 
 | Level | Name | Behavior | Examples |
 |-------|------|----------|----------|
-| L0 | Auto | Execute without confirmation | Typo fixes, phrasing improvements |
-| L1 | Ask | Show preview, ask for confirmation | New skills, instruction changes |
-| L2 | Suggest | Generate report only | Deletions, behavior changes |
-| L3 | Forbidden | Never modify | Secrets, auth data |
+| 🟢 | Auto | Execute without confirmation | Typo fixes, phrasing improvements |
+| 🟡 | Ask | Show preview, ask for confirmation | New skills, instruction changes |
+| 🔴 | Forbid | Generate report only, never auto-execute | Deletions, behavior changes, secrets |
 
 ## Safety Mechanisms
 
@@ -82,17 +82,23 @@ Edit `config/evolution-config.json`:
 
 ```json
 {
-  "enabled": true,
+  "evolutionEnabled": true,
   "triggers": {
-    "error": { "threshold": 3, "cooldownMinutes": 30 },
-    "timer": { "intervalHours": 24 }
+    "error": { "enabled": true, "threshold": 3, "cooldownMinutes": 30 },
+    "timer": { "enabled": true, "intervalHours": 24 },
+    "manual": { "enabled": true }
   },
   "limits": {
-    "L0": { "perHour": 10, "perDay": 50 },
-    "L1": { "perHour": 5, "perDay": 20 }
+    "auto": { "perHour": 10, "perDay": 50 },
+    "ask": { "perHour": 5, "perDay": 20 },
+    "forbid": { "perHour": 20, "perDay": 100 }
   }
 }
 ```
+
+### Global Switch
+
+Set `evolutionEnabled: false` to disable the entire evolution system.
 
 ## Architecture
 
@@ -105,7 +111,7 @@ openclaw-evolution/
 │   ├── triggers/         # Error, timer, manual triggers
 │   ├── analyzers/        # Root cause, framework, metrics
 │   ├── classifiers/      # Risk classification
-│   ├── executors/        # L0-L3 execution handlers
+│   ├── executors/        # 🟢🟡🔴 execution handlers
 │   ├── storage/          # Error log, evolution log, metrics
 │   └── safety/           # Path checker, rate limiter, rollback
 ├── skills/evolve/        # SKILL.md definition

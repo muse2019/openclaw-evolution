@@ -1,5 +1,6 @@
 /**
  * OpenClaw Evolution Plugin - Type Definitions
+ * Refactored to use real OpenClaw Plugin API
  */
 
 // ============================================
@@ -8,12 +9,11 @@
 
 /**
  * Risk levels for evolution proposals
- * - L0: Auto-execute (low risk, typo fixes, phrasing improvements)
- * - L1: Ask user (medium risk, new skills, config changes)
- * - L2: Suggest only (high risk, deletions, behavior changes)
- * - L3: Forbidden (critical, secrets, auth data)
+ * 🟢 Auto: Execute without asking (typo fixes, phrasing improvements)
+ * 🟡 Ask:  Show preview, ask for confirmation (new skills, config changes)
+ * 🔴 Forbid: Never auto-execute, generate report only (deletions, behavior changes)
  */
-export type RiskLevel = 'L0' | 'L1' | 'L2' | 'L3';
+export type RiskLevel = 'auto' | 'ask' | 'forbid';
 
 /**
  * Evolution target categories
@@ -70,6 +70,7 @@ export interface ErrorContext {
   errorMessage: string;
   errorType: string;
   skillName?: string;
+  toolName?: string;
   userInput?: string;
   executionTrace?: string[];
   recoveryAttempted?: boolean;
@@ -158,6 +159,8 @@ export interface EffectivenessMetrics {
  */
 export interface EvolutionConfig {
   enabled: boolean;
+  errorThreshold: number;
+  cooldownMinutes: number;
   triggers: {
     error: {
       enabled: boolean;
@@ -173,9 +176,9 @@ export interface EvolutionConfig {
     };
   };
   limits: {
-    L0: RateLimit;
-    L1: RateLimit;
-    L2: RateLimit;
+    auto: RateLimit;
+    ask: RateLimit;
+    forbid: RateLimit;
   };
   paths: {
     allowlist: string[];
@@ -207,58 +210,6 @@ export interface ClassificationRule {
 }
 
 // ============================================
-// Plugin Interface Types
-// ============================================
-
-/**
- * Plugin API provided by OpenClaw
- */
-export interface OpenClawAPI {
-  registerSkill(path: string): void;
-  registerTool(tool: ToolDefinition): void;
-  registerHook(hook: HookDefinition): void;
-  log(message: string, level?: 'info' | 'warn' | 'error'): void;
-  askUser(question: string, options: string[]): Promise<string>;
-  readFile(path: string): Promise<string>;
-  writeFile(path: string, content: string): Promise<void>;
-  getSkill(name: string): Promise<string>;
-  updateSkill(name: string, content: string): Promise<void>;
-  getConfig(key: string): Promise<unknown>;
-  setConfig(key: string, value: unknown): Promise<void>;
-  getMemory(key: string): Promise<unknown>;
-  setMemory(key: string, value: unknown): Promise<void>;
-}
-
-/**
- * Tool definition for OpenClaw
- */
-export interface ToolDefinition {
-  name: string;
-  description: string;
-  parameters: Record<string, unknown>;
-  handler: (params: Record<string, unknown>) => Promise<unknown>;
-}
-
-/**
- * Hook definition for OpenClaw
- */
-export interface HookDefinition {
-  event: string;
-  handler: (context: unknown) => Promise<void>;
-}
-
-/**
- * Plugin definition
- */
-export interface PluginDefinition {
-  id: string;
-  name: string;
-  version: string;
-  description: string;
-  register(api: OpenClawAPI): Promise<void>;
-}
-
-// ============================================
 // Result Types
 // ============================================
 
@@ -283,4 +234,109 @@ export interface EngineStatus {
   proposalsExecuted: number;
   proposalsRolledBack: number;
   recentErrors: number;
+}
+
+// ============================================
+// Plugin Interface Types (Real OpenClaw API)
+// ============================================
+
+/**
+ * Plugin definition for OpenClaw
+ * Based on OpenClawPluginDefinition
+ */
+export interface EvolutionPluginDefinition {
+  id: string;
+  name: string;
+  version: string;
+  description: string;
+  register(api: EvolutionPluginApi): Promise<void>;
+}
+
+/**
+ * Evolution-specific API wrapper
+ * Wraps the real OpenClawPluginApi with additional helpers
+ */
+export interface EvolutionPluginApi {
+  // Core API from OpenClaw
+  registerTool(tool: EvolutionToolDefinition, opts?: { name: string }): void;
+  registerHook(event: PluginHookName, handler: (event: unknown) => Promise<void>): void;
+  logger: PluginLogger;
+  
+  // Configuration
+  config: {
+    evolutionEnabled: boolean;
+    errorThreshold: number;
+    cooldownMinutes: number;
+  };
+  
+  // Runtime context
+  runtime: {
+    workspaceDir: string;
+    agentDir: string;
+  };
+}
+
+/**
+ * Available hook events in OpenClaw
+ */
+export type PluginHookName = 'after_tool_call' | 'session_end' | 'before_reset';
+
+/**
+ * Logger interface from OpenClaw
+ */
+export interface PluginLogger {
+  info(message: string): void;
+  warn(message: string): void;
+  error(message: string): void;
+}
+
+/**
+ * Tool definition for OpenClaw (simplified for evolution plugin)
+ */
+export interface EvolutionToolDefinition {
+  name: string;
+  description: string;
+  parameters: {
+    type: 'object';
+    properties: Record<string, {
+      type: string;
+      description: string;
+      default?: unknown;
+    }>;
+    required?: string[];
+  };
+  handler: (params: Record<string, unknown>, ctx: ToolContext) => Promise<unknown>;
+}
+
+/**
+ * Tool context provided by OpenClaw
+ */
+export interface ToolContext {
+  workspaceDir: string;
+  agentDir: string;
+  sessionKey: string;
+  sessionId: string;
+}
+
+/**
+ * After tool call hook event
+ */
+export interface AfterToolCallEvent {
+  toolName: string;
+  success: boolean;
+  error?: Error;
+  result?: unknown;
+  params?: Record<string, unknown>;
+}
+
+/**
+ * Session end hook event
+ */
+export interface SessionEndEvent {
+  sessionId: string;
+  sessionKey: string;
+  messages?: Array<{
+    role: string;
+    content: string;
+  }>;
 }

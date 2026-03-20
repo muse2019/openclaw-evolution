@@ -84,6 +84,21 @@ export class MetricsStore {
   }
 
   /**
+   * Record session end
+   */
+  async recordSessionEnd(sessionId: string): Promise<void> {
+    const entry: MetricEntry = {
+      timestamp: new Date(),
+      type: 'success',
+      details: { sessionId, sessionEnd: true },
+    };
+
+    this.entries.unshift(entry);
+    this.trim();
+    await this.save();
+  }
+
+  /**
    * Get aggregated metrics for a period
    */
   getAggregated(period: 'hour' | 'day' | 'week' | 'month'): AggregatedMetrics {

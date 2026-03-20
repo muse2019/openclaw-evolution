@@ -8,15 +8,15 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 interface RateLimitConfig {
-  L0: RateLimit;
-  L1: RateLimit;
-  L2: RateLimit;
+  auto: RateLimit;
+  ask: RateLimit;
+  forbid: RateLimit;
 }
 
 const DEFAULT_LIMITS: RateLimitConfig = {
-  L0: { perHour: 10, perDay: 50 },
-  L1: { perHour: 5, perDay: 20 },
-  L2: { perHour: 20, perDay: 100 }, // Reports are cheap
+  auto: { perHour: 10, perDay: 50 },
+  ask: { perHour: 5, perDay: 20 },
+  forbid: { perHour: 20, perDay: 100 },
 };
 
 interface ExecutionRecord {
@@ -45,11 +45,11 @@ export class RateLimiter {
     remainingHour: number;
     remainingDay: number;
   } {
-    // L3 is always forbidden, no rate limiting needed
-    if (level === 'L3') {
+    // forbid is always logged/reported only, not auto-executed
+    if (level === 'forbid') {
       return {
         allowed: false,
-        reason: 'L3 changes are forbidden',
+        reason: '🔴 forbid changes are report-only, not auto-executed',
         remainingHour: 0,
         remainingDay: 0,
       };
@@ -67,7 +67,7 @@ export class RateLimiter {
       r => r.timestamp > dayAgo && r.level === level
     ).length;
 
-    const limit = this.limits[level as 'L0' | 'L1' | 'L2'];
+    const limit = this.limits[level as 'auto' | 'ask'];
     const remainingHour = Math.max(0, limit.perHour - hourExecutions);
     const remainingDay = Math.max(0, limit.perDay - dayExecutions);
 
@@ -118,7 +118,7 @@ export class RateLimiter {
 
     const result = {} as Record<RiskLevel, { hour: number; day: number; limitHour: number; limitDay: number }>;
 
-    for (const level of ['L0', 'L1', 'L2'] as const) {
+    for (const level of ['auto', 'ask', 'forbid'] as const) {
       const hourCount = this.records.filter(
         r => r.timestamp > hourAgo && r.level === level
       ).length;

@@ -7,119 +7,119 @@ import { RiskLevel, EvolutionProposal, ClassificationRule } from '../types.js';
 
 // Default classification rules
 const DEFAULT_RULES: ClassificationRule[] = [
-  // L3: Forbidden - Security sensitive
+  // 🔴 Forbid - Security sensitive (never auto-execute)
   {
     id: 'api-keys',
     pattern: /api[_-]?key|apikey|api_secret/i,
-    level: 'L3',
+    level: 'forbid',
     reason: 'Contains API key reference',
   },
   {
     id: 'secrets',
     pattern: /secret|password|passwd|pwd/i,
-    level: 'L3',
+    level: 'forbid',
     reason: 'Contains secret/password reference',
   },
   {
     id: 'tokens',
     pattern: /token|auth[_-]?key|private[_-]?key/i,
-    level: 'L3',
+    level: 'forbid',
     reason: 'Contains token or private key reference',
   },
   {
     id: 'env-files',
     pattern: /\.env|credentials\.json|secrets\.json/i,
-    level: 'L3',
+    level: 'forbid',
     reason: 'Sensitive configuration file',
   },
   {
     id: 'auth-directory',
     pattern: /\/auth\/|\/secrets\/|\/\.credentials\//i,
-    level: 'L3',
+    level: 'forbid',
     reason: 'Protected directory',
   },
 
-  // L2: Suggest only - High risk
+  // 🔴 Forbid - High risk (report only, never auto-execute)
   {
     id: 'delete-skill',
     pattern: /delete.*skill|remove.*skill|remove.*capability/i,
-    level: 'L2',
-    reason: 'Deleting skills is high risk',
+    level: 'forbid',
+    reason: 'Deleting skills is high risk - report only',
   },
   {
     id: 'core-behavior',
     pattern: /change.*core|modify.*behavior|alter.*fundamental/i,
-    level: 'L2',
+    level: 'forbid',
     reason: 'Core behavior changes need careful review',
   },
   {
     id: 'safety-removal',
     pattern: /remove.*safety|disable.*check|skip.*validation/i,
-    level: 'L2',
+    level: 'forbid',
     reason: 'Safety mechanism modification',
   },
   {
     id: 'framework-structure',
     pattern: /restructure.*framework|redesign.*architecture/i,
-    level: 'L2',
+    level: 'forbid',
     reason: 'Framework restructuring is high impact',
   },
 
-  // L1: Ask user - Medium risk
+  // 🟡 Ask user - Medium risk (require confirmation)
   {
     id: 'create-skill',
     pattern: /create.*skill|add.*skill|new.*skill/i,
-    level: 'L1',
+    level: 'ask',
     reason: 'Creating new skills requires user approval',
   },
   {
     id: 'add-tool',
     pattern: /add.*tool|create.*tool|new.*tool/i,
-    level: 'L1',
+    level: 'ask',
     reason: 'Adding tools requires user approval',
   },
   {
     id: 'modify-instruction',
     pattern: /modify.*instruction|update.*instruction|change.*instruction/i,
-    level: 'L1',
+    level: 'ask',
     reason: 'Instruction changes require user approval',
   },
   {
     id: 'config-change',
     pattern: /update.*config|change.*config|modify.*config/i,
-    level: 'L1',
+    level: 'ask',
     reason: 'Configuration changes require user approval',
   },
   {
     id: 'memory-update',
     pattern: /update.*memory|modify.*memory|change.*habit/i,
-    level: 'L1',
+    level: 'ask',
     reason: 'Memory updates require user approval',
   },
 
-  // L0: Auto - Low risk
+  // 🟢 Auto - Low risk (execute directly)
   {
     id: 'typo-fix',
     pattern: /fix.*typo|correct.*spelling|typo.*correction/i,
-    level: 'L0',
+    level: 'auto',
     reason: 'Typo fixes are safe',
   },
   {
     id: 'phrasing-improve',
     pattern: /improve.*phrasing|clarify.*instruction|better.*wording/i,
-    level: 'L0',
+    level: 'auto',
     reason: 'Phrasing improvements are safe',
   },
   {
     id: 'format-fix',
     pattern: /fix.*format|correct.*format|formatting.*fix/i,
-    level: 'L0',
+    level: 'auto',
     reason: 'Format fixes are safe',
   },
   {
     id: 'error-message',
     pattern: /improve.*error.*message|clarify.*error|better.*error/i,
-    level: 'L0',
+    level: 'auto',
     reason: 'Error message improvements are safe',
   },
 ];
@@ -234,15 +234,15 @@ export class RiskClassifier {
   } {
     switch (proposal.type) {
       case 'skill':
-        return { level: 'L1', reason: 'Skill modifications require approval by default' };
+        return { level: 'ask', reason: 'Skill modifications require approval by default' };
       case 'config':
-        return { level: 'L1', reason: 'Configuration changes require approval by default' };
+        return { level: 'ask', reason: 'Configuration changes require approval by default' };
       case 'memory':
-        return { level: 'L1', reason: 'Memory changes require approval by default' };
+        return { level: 'ask', reason: 'Memory changes require approval by default' };
       case 'framework':
-        return { level: 'L2', reason: 'Framework changes are high risk by default' };
+        return { level: 'forbid', reason: 'Framework changes are high risk by default' };
       default:
-        return { level: 'L1', reason: 'Unknown target type - requiring approval' };
+        return { level: 'ask', reason: 'Unknown target type - requiring approval' };
     }
   }
 }

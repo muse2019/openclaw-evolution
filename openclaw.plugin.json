@@ -1,0 +1,25 @@
+{
+  "id": "openclaw-evolution",
+  "name": "OpenClaw Evolution",
+  "description": "Self-evolution plugin - learns from errors and improves itself",
+  "version": "0.2.0",
+  "skills": ["./skills/evolve"],
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "evolutionEnabled": {
+        "type": "boolean",
+        "default": true
+      },
+      "errorThreshold": {
+        "type": "number",
+        "default": 3
+      },
+      "cooldownMinutes": {
+        "type": "number",
+        "default": 30
+      }
+    }
+  }
+}
