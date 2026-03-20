@@ -94,7 +94,7 @@ const plugin: OpenClawPluginDefinition = {
     }
 
     const config: EvolutionConfig = {
-      enabled: true,
+      enabled: evolutionEnabled as boolean,
       errorThreshold: errorThreshold as number,
       cooldownMinutes: cooldownMinutes as number,
       triggers: {
