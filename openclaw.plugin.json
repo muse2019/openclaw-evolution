@@ -19,6 +19,14 @@
       "cooldownMinutes": {
         "type": "number",
         "default": 30
+      },
+      "feedbackThreshold": {
+        "type": "number",
+        "default": 10
+      },
+      "feedbackCooldownHours": {
+        "type": "number",
+        "default": 6
       }
     }
   }

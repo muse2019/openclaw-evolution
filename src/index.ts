@@ -298,6 +298,38 @@ const plugin: OpenClawPluginDefinition = {
       },
     });
 
+    // /feedback_evolve command
+    api.registerCommand({
+      name: 'feedback_evolve',
+      description: 'Run feedback-driven evolution',
+      acceptsArgs: false,
+      handler: async (): Promise<ReplyPayload> => {
+        if (!engine) return reply('❌ Evolution engine not initialized');
+        const trigger = (engine as any).feedbackTrigger;
+        if (!trigger) return reply('❌ Feedback trigger not initialized');
+        await trigger.check();
+        return reply('✅ Feedback-driven evolution check triggered');
+      },
+    });
+
+    // /feedback command (collect feedback)
+    api.registerCommand({
+      name: 'feedback',
+      description: 'Submit feedback about the assistant',
+      acceptsArgs: true,
+      handler: async (ctx: PluginCommandContext): Promise<ReplyPayload> => {
+        if (!engine) return reply('❌ Evolution engine not initialized');
+        const message = ctx.commandBody.trim();
+        if (!message) return reply('❌ Usage: `/feedback <your feedback message>`');
+        const { detectSentiment } = await import('./triggers/feedback-trigger.js');
+        const sentiment = detectSentiment(message);
+        const store = (engine as any).feedbackStore;
+        if (!store) return reply('❌ Feedback store not initialized');
+        await store.record(message, sentiment, {});
+        return reply(`📝 Feedback recorded (${sentiment}). Thank you!`);
+      },
+    });
+
     // Register after_tool_call hook to collect errors
     api.registerHook('after_tool_call', async (event: unknown) => {
       const ctx = event as Record<string, unknown>;
@@ -310,6 +342,10 @@ const plugin: OpenClawPluginDefinition = {
         };
         await engine.recordError(errorContext);
       }
+
+      // Natural language feedback collection (新增)
+      // 从 ctx.result 中尝试提取用户满意度信号（如果有）
+      // 注意：这里只能记录结构化的 context，实际 feedback 由用户通过 /feedback 命令提供
     });
 
     // Register session_end hook
