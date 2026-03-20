@@ -14,12 +14,12 @@ import {
   EvolutionConfig,
 } from './types.js';
 
-import { ErrorLog, EvolutionLog, MetricsStore } from './storage/index.js';
+import { ErrorLog, EvolutionLog, MetricsStore, FeedbackStore, FeedbackEntry } from './storage/index.js';
 import { RiskClassifier } from './classifiers/index.js';
 import { PathChecker, RateLimiter, RollbackManager } from './safety/index.js';
-import { RootCauseAnalyzer, FrameworkAnalyzer, MetricsAnalyzer } from './analyzers/index.js';
-import { AutoExecutor, AskExecutor, SuggestExecutor, ForbiddenExecutor, Executor } from './executors/index.js';
-import { ErrorTrigger, TimerTrigger, ManualTrigger, ManualTriggerOptions } from './triggers/index.js';
+import { RootCauseAnalyzer, FrameworkAnalyzer, MetricsAnalyzer, FeedbackAnalyzer, FeedbackAnalysisResult } from './analyzers/index.js';
+import { AutoExecutor, AskExecutor, SuggestExecutor, ForbiddenExecutor, Executor, EvolutionExecutor } from './executors/index.js';
+import { ErrorTrigger, TimerTrigger, ManualTrigger, ManualTriggerOptions, FeedbackTrigger } from './triggers/index.js';
 
 export interface EvolutionEngineConfig {
   dataDir: string;
@@ -54,6 +54,11 @@ export class EvolutionEngine {
   private errorTrigger: ErrorTrigger;
   private timerTrigger: TimerTrigger;
   private manualTrigger: ManualTrigger;
+
+  // Feedback-driven evolution
+  private feedbackStore: FeedbackStore;
+  private feedbackTrigger: FeedbackTrigger;
+  private evolutionExecutor: EvolutionExecutor;
 
   // State
   private api: { logger: { info: (msg: string) => void; warn: (msg: string) => void; error: (msg: string) => void } };
@@ -99,6 +104,34 @@ export class EvolutionEngine {
     this.timerTrigger = new TimerTrigger();
     this.manualTrigger = new ManualTrigger();
 
+    // Initialize feedback-driven evolution components
+    this.feedbackStore = new FeedbackStore(engineConfig.dataDir);
+
+    // Initialize EvolutionExecutor
+    const executorConfig = {
+      workspaceDir: engineConfig.workspaceDir,
+      allowedPaths: engineConfig.config.paths.allowlist,
+      blockedPaths: engineConfig.config.paths.blocklist,
+      maxRetries: 3,
+      buildCommand: 'npm run build',
+    };
+    this.evolutionExecutor = new EvolutionExecutor(executorConfig);
+
+    // Initialize FeedbackTrigger
+    const feedbackTriggerConfig = {
+      feedbackStore: this.feedbackStore,
+      threshold: engineConfig.config.feedbackThreshold ?? 10,
+      cooldownHours: engineConfig.config.feedbackCooldownHours ?? 6,
+    };
+    this.feedbackTrigger = new FeedbackTrigger(feedbackTriggerConfig);
+
+    // Subscribe to feedback trigger
+    this.feedbackTrigger.onTrigger(async (entries) => {
+      const analyzer = new FeedbackAnalyzer();
+      const analysis = analyzer.analyze(entries);
+      await this.runFeedbackEvolution(analysis);
+    });
+
     // Wire up trigger callbacks
     this.setupTriggers();
   }
@@ -116,6 +149,11 @@ export class EvolutionEngine {
     this.running = true;
     this.timerTrigger.start();
     this.api.logger.info('[Evolution] Engine started');
+
+    // Periodic feedback check - every hour
+    setInterval(() => {
+      this.feedbackTrigger.check();
+    }, 60 * 60 * 1000);
   }
 
   /**
@@ -353,5 +391,21 @@ export class EvolutionEngine {
     }
 
     return result;
+  }
+
+  private async runFeedbackEvolution(analysis: FeedbackAnalysisResult): Promise<void> {
+    for (const insight of analysis.insights) {
+      const result = await this.evolutionExecutor.executeFeedbackImprovement({
+        negativeFeedback: insight.examples,
+        targetSkill: insight.pattern,
+      });
+      
+      if (result.success) {
+        this.api.logger.info(`[Evolution] Feedback-driven evolution completed for pattern: ${insight.pattern}`);
+        this.proposalsExecuted++;
+      } else {
+        this.api.logger.error(`[Evolution] Feedback-driven evolution failed for pattern: ${insight.pattern} - ${result.error}`);
+      }
+    }
   }
 }

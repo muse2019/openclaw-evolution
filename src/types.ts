@@ -161,6 +161,8 @@ export interface EvolutionConfig {
   enabled: boolean;
   errorThreshold: number;
   cooldownMinutes: number;
+  feedbackThreshold?: number;    // 默认 10
+  feedbackCooldownHours?: number; // 默认 6
   triggers: {
     error: {
       enabled: boolean;
