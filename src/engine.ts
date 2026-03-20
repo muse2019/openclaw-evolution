@@ -280,6 +280,12 @@ export class EvolutionEngine {
     type: TriggerType,
     options?: ManualTriggerOptions & { errors?: ErrorContext[] }
   ): Promise<EvolutionResult[]> {
+    // Check if evolution is enabled
+    if (!this.config.enabled) {
+      this.api.logger.info('[Evolution] Plugin is disabled (enabled=false). Skipping.');
+      return [];
+    }
+
     const results: EvolutionResult[] = [];
 
     try {
