@@ -1,0 +1,34 @@
+{
+  "name": "openclaw-evolution",
+  "version": "0.1.0",
+  "description": "Self-evolution plugin for OpenClaw - learns from errors and improves itself",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js",
+    "lint": "eslint src --ext .ts"
+  },
+  "keywords": [
+    "openclaw",
+    "plugin",
+    "evolution",
+    "self-improvement",
+    "ai"
+  ],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.0.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "openclaw": {
+    "extensions": ["./dist/index.js"],
+    "skills": ["./skills/evolve"]
+  }
+}
