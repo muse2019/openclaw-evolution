@@ -226,6 +226,17 @@ export class MetricsStore {
     return { improving, degrading };
   }
 
+  /**
+   * Update evolution effectiveness metrics
+   * Called after evolution runs to track impact
+   */
+  async updateEvolutionEffectiveness(): Promise<void> {
+    // Recalculate trending data to update effectiveness metrics
+    this.getTrending();
+    this.getAggregated('day');
+    this.getAggregated('week');
+  }
+
   // ============================================
   // Private methods
   // ============================================

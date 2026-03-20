@@ -25,8 +25,11 @@ import type {
 } from 'openclaw';
 import { EvolutionEngine } from './engine.js';
 import type { EvolutionConfig, ErrorContext } from './types.js';
+import { AskExecutor } from './executors/ask.js';
+import { EvolutionLog } from './storage/index.js';
 import * as path from 'path';
 import * as os from 'os';
+import * as fs from 'fs';
 
 // Plugin metadata
 const PLUGIN_ID = 'openclaw-evolution';
@@ -212,6 +215,86 @@ const plugin: OpenClawPluginDefinition = {
         return reply(success
           ? `✅ Rolled back evolution \`${evolutionId}\`. Reason: ${reasonParts.join(' ')}`
           : `❌ Rollback failed — evolution \`${evolutionId}\` not found or already rolled back`);
+      },
+    });
+
+    // Register /evolution_approve command
+    api.registerCommand({
+      name: 'evolution_approve',
+      description: 'Approve a pending evolution proposal',
+      acceptsArgs: true,
+      handler: async (ctx: PluginCommandContext): Promise<ReplyPayload> => {
+        const proposalId = ctx.commandBody.trim();
+        if (!proposalId) return reply('❌ Usage: `/evolution_approve <proposal_id>`');
+
+        const pendingDir = path.join(dataDir, 'pending');
+        const proposalFile = path.join(pendingDir, `${proposalId}.json`);
+        const previewFile = path.join(pendingDir, `${proposalId}.md`);
+
+        if (!fs.existsSync(proposalFile)) {
+          return reply(`❌ Proposal \`${proposalId}\` not found`);
+        }
+
+        try {
+          // Read the proposal
+          const proposalData = JSON.parse(fs.readFileSync(proposalFile, 'utf-8'));
+          const proposal = {
+            ...proposalData,
+            timestamp: new Date(proposalData.timestamp),
+          };
+
+          // Create executor to apply the change
+          const evolutionLog = new EvolutionLog(dataDir);
+          const askExecutor = new AskExecutor(dataDir, evolutionLog);
+
+          // Get before content
+          const targetPath = proposal.target;
+          let beforeContent = '';
+          if (fs.existsSync(targetPath)) {
+            beforeContent = fs.readFileSync(targetPath, 'utf-8');
+          }
+
+          // Execute the approved proposal
+          const result = await askExecutor.executeApproved(proposal, beforeContent);
+
+          // Clean up pending files
+          if (fs.existsSync(proposalFile)) fs.unlinkSync(proposalFile);
+          if (fs.existsSync(previewFile)) fs.unlinkSync(previewFile);
+
+          return reply(result.success
+            ? `✅ Approved and executed: ${proposal.change}`
+            : `❌ Execution failed: ${result.message}`);
+        } catch (error) {
+          return reply(`❌ Error: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        }
+      },
+    });
+
+    // Register /evolution_reject command
+    api.registerCommand({
+      name: 'evolution_reject',
+      description: 'Reject a pending evolution proposal',
+      acceptsArgs: true,
+      handler: async (ctx: PluginCommandContext): Promise<ReplyPayload> => {
+        const proposalId = ctx.commandBody.trim();
+        if (!proposalId) return reply('❌ Usage: `/evolution_reject <proposal_id>`');
+
+        const pendingDir = path.join(dataDir, 'pending');
+        const proposalFile = path.join(pendingDir, `${proposalId}.json`);
+        const previewFile = path.join(pendingDir, `${proposalId}.md`);
+
+        const jsonExists = fs.existsSync(proposalFile);
+        const mdExists = fs.existsSync(previewFile);
+
+        if (!jsonExists && !mdExists) {
+          return reply(`❌ Proposal \`${proposalId}\` not found`);
+        }
+
+        // Delete pending files
+        if (jsonExists) fs.unlinkSync(proposalFile);
+        if (mdExists) fs.unlinkSync(previewFile);
+
+        return reply(`🚫 Rejected proposal \`${proposalId}\``);
       },
     });
 
