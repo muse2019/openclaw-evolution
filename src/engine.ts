@@ -347,6 +347,11 @@ export class EvolutionEngine {
       await this.rateLimiter.recordExecution(proposal.riskLevel);
     }
 
+    // 7. Record success for metrics tracking
+    if (result.success) {
+      await this.metricsStore.recordSuccess(proposal.type);
+    }
+
     return result;
   }
 }

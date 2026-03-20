@@ -27,6 +27,8 @@ export class ErrorTrigger {
   private errorLog: ErrorLog;
   private callback: TriggerCallback | null = null;
   private lastTriggered: Date | null = null;
+  // Track per-pattern trigger times for cooldown
+  private patternLastTriggered: Map<string, Date> = new Map();
 
   constructor(errorLog: ErrorLog, config?: Partial<ErrorTriggerConfig>) {
     this.errorLog = errorLog;
@@ -52,8 +54,8 @@ export class ErrorTrigger {
     await this.errorLog.log(error);
 
     // Check if we should trigger
-    if (await this.shouldTrigger()) {
-      await this.fire();
+    if (await this.shouldTrigger(error)) {
+      await this.fire(error.errorType);
       return true;
     }
 
@@ -61,10 +63,22 @@ export class ErrorTrigger {
   }
 
   /**
-   * Check if the trigger should fire
+   * Check if the trigger should fire for a specific pattern
    */
-  private async shouldTrigger(): Promise<boolean> {
-    // Check cooldown
+  private async shouldTrigger(error: ErrorContext): Promise<boolean> {
+    const patternKey = this.extractPatternKey(error);
+
+    // Check per-pattern cooldown
+    const lastPatternTrigger = this.patternLastTriggered.get(patternKey);
+    if (lastPatternTrigger) {
+      const cooldownMs = this.config.cooldownMinutes * 60 * 1000;
+      const timeSinceLastTrigger = Date.now() - lastPatternTrigger.getTime();
+      if (timeSinceLastTrigger < cooldownMs) {
+        return false;
+      }
+    }
+
+    // Check global cooldown
     if (this.lastTriggered) {
       const cooldownMs = this.config.cooldownMinutes * 60 * 1000;
       const timeSinceLastTrigger = Date.now() - this.lastTriggered.getTime();
@@ -73,9 +87,15 @@ export class ErrorTrigger {
       }
     }
 
-    // Check threshold
-    const stats = this.errorLog.getStats();
-    if (stats.last24Hours >= this.config.threshold) {
+    // Get recent errors and filter by this pattern
+    const recentErrors = this.errorLog.getRecent(50);
+    const patternErrors = recentErrors.filter(e => {
+      const entryPatternKey = this.extractPatternKey(e.error);
+      return entryPatternKey === patternKey;
+    });
+
+    // Check threshold for this pattern
+    if (patternErrors.length >= this.config.threshold) {
       return true;
     }
 
@@ -83,12 +103,31 @@ export class ErrorTrigger {
   }
 
   /**
+   * Extract a pattern key from an error for grouping
+   */
+  private extractPatternKey(error: ErrorContext): string {
+    // Use errorType as the primary pattern identifier
+    // Combine with skillName or toolName if available for more specific grouping
+    const parts = [error.errorType];
+    
+    if (error.skillName) {
+      parts.push(error.skillName);
+    } else if (error.toolName) {
+      parts.push(error.toolName);
+    }
+    
+    return parts.join(':');
+  }
+
+  /**
    * Fire the trigger
    */
-  private async fire(): Promise<void> {
+  private async fire(patternKey: string): Promise<void> {
     if (!this.callback) return;
 
-    this.lastTriggered = new Date();
+    const now = new Date();
+    this.lastTriggered = now;
+    this.patternLastTriggered.set(patternKey, now);
 
     // Get recent errors for context
     const recentErrors = this.errorLog.getRecent(this.config.threshold);

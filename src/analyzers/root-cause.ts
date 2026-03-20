@@ -165,13 +165,23 @@ export class RootCauseAnalyzer {
   private createProposalForPattern(pattern: ErrorPattern): EvolutionProposal | null {
     const id = `evo-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
+    // Extract skill name from pattern if present (format: "errorType:skillName:category")
+    const patternParts = pattern.pattern.split(':');
+    const skillName = patternParts.length > 1 ? patternParts[1] : null;
+    
+    // Determine target path based on available context
+    let target = 'SKILL.md'; // fallback
+    if (skillName && skillName !== 'undefined') {
+      target = `skills/${skillName}/SKILL.md`;
+    }
+
     // Generate proposal based on pattern type
     if (pattern.pattern.includes('ambiguous_instruction')) {
       return {
         id,
         timestamp: new Date(),
         type: 'skill',
-        target: 'SKILL.md',
+        target,
         change: 'Clarify instructions to reduce ambiguity',
         reasoning: `Pattern "${pattern.pattern}" occurred ${pattern.occurrences} times. Examples: ${pattern.examples.join('; ')}`,
         status: 'pending',
@@ -184,7 +194,7 @@ export class RootCauseAnalyzer {
         id,
         timestamp: new Date(),
         type: 'skill',
-        target: 'SKILL.md',
+        target,
         change: 'Add missing capability or skill',
         reasoning: `Pattern "${pattern.pattern}" suggests a capability gap. Occurred ${pattern.occurrences} times.`,
         status: 'pending',
@@ -197,7 +207,7 @@ export class RootCauseAnalyzer {
         id,
         timestamp: new Date(),
         type: 'skill',
-        target: 'SKILL.md',
+        target,
         change: 'Improve input validation in skill',
         reasoning: `Validation errors occurred ${pattern.occurrences} times. Need better validation logic.`,
         status: 'pending',
@@ -211,11 +221,22 @@ export class RootCauseAnalyzer {
   private createProposalForError(error: ErrorContext, pattern: string): EvolutionProposal {
     const id = `evo-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
+    // Determine target path based on available context
+    let target = 'SKILL.md'; // fallback
+    
+    if (error.toolName) {
+      // If toolName is available, target the tool's source file
+      target = `src/tools/${error.toolName}.ts`;
+    } else if (error.skillName) {
+      // If skillName is available, target the skill directory
+      target = `skills/${error.skillName}/SKILL.md`;
+    }
+
     return {
       id,
       timestamp: new Date(),
       type: 'skill',
-      target: error.skillName || 'SKILL.md',
+      target,
       change: `Fix ${pattern.replace('_', ' ')} issue`,
       reasoning: `Error: ${error.errorMessage}`,
       status: 'pending',

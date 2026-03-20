@@ -109,15 +109,41 @@ export class AutoExecutor implements Executor {
   }
 
   private applyTextImprovement(content: string, change: string): string {
-    // This is a placeholder - actual implementation would parse the change
-    // and apply specific text improvements (typo fixes, phrasing improvements)
-    // For now, we just return the content unchanged
-    // In a real implementation, this would use NLP or pattern matching
-    // to apply the described change
-    
-    // Example: if change is "fix typo 'recieve' -> 'receive'"
-    // we would search and replace in the content
-    
+    // Pattern 1: "fix typo 'recieve' -> 'receive'" or "fix typo 'recieve' to 'receive'"
+    const fixTypoMatch = change.match(/fix typo\s+['"]([^'"]+)['"]\s*(?:->|to)\s*['"]([^'"]+)['"]/i);
+    if (fixTypoMatch) {
+      const [, from, to] = fixTypoMatch;
+      // Use global replace for the typo
+      const regex = new RegExp(from.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g');
+      return content.replace(regex, to);
+    }
+
+    // Pattern 2: "'old' -> 'new'" or "'old' to 'new'" (general replacement)
+    const arrowMatch = change.match(/['"]([^'"]+)['"]\s*(?:->|to)\s*['"]([^'"]+)['"]/i);
+    if (arrowMatch) {
+      const [, from, to] = arrowMatch;
+      const regex = new RegExp(from.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g');
+      return content.replace(regex, to);
+    }
+
+    // Pattern 3: "clarify X" or "improve X" - append a comment noting the suggestion
+    const clarifyMatch = change.match(/(clarify|improve|update|add)\s+(.+)/i);
+    if (clarifyMatch) {
+      const suggestion = clarifyMatch[2];
+      // Append as a comment for human review
+      const comment = `\n\n<!-- Evolution suggestion: ${suggestion} -->`;
+      return content + comment;
+    }
+
+    // Pattern 4: "remove X" or "delete X"
+    const removeMatch = change.match(/(remove|delete)\s+['"]([^'"]+)['"]/i);
+    if (removeMatch) {
+      const [, , target] = removeMatch;
+      const regex = new RegExp(target.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g');
+      return content.replace(regex, '');
+    }
+
+    // No recognized pattern - return unchanged
     return content;
   }
 }
