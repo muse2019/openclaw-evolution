@@ -7,3 +7,4 @@ export { AutoExecutor } from './auto.js';
 export { AskExecutor } from './ask.js';
 export { SuggestExecutor } from './suggest.js';
 export { ForbiddenExecutor } from './forbidden.js';
+export { EvolutionExecutor } from './evolution-executor.js';
