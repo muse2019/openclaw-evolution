@@ -120,7 +120,7 @@ export class EvolutionEngine {
     // Initialize FeedbackTrigger
     const feedbackTriggerConfig = {
       feedbackStore: this.feedbackStore,
-      threshold: engineConfig.config.feedbackThreshold ?? 10,
+      threshold: engineConfig.config.feedbackThreshold ?? 3,
       cooldownHours: engineConfig.config.feedbackCooldownHours ?? 6,
     };
     this.feedbackTrigger = new FeedbackTrigger(feedbackTriggerConfig);
